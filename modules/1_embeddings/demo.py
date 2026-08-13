@@ -45,6 +45,16 @@ from sklearn.metrics.pairwise import cosine_similarity  # Measure similarity bet
 import matplotlib.pyplot as plt # For visualizing embeddings
 from dotenv import load_dotenv  # Load environment variables from .env file
 
+import sys
+from pathlib import Path
+
+current_script_dir = Path(__file__).resolve().parent
+utils_dir = current_script_dir.parents[1] / "utils" # parents[2] ≍ '/../../'
+utils_dir = utils_dir.resolve()  # normalize (removes any ".." and resolves symlinks where possible)
+sys.path.insert(0, str(utils_dir))  # `sys.path` is the list of directories Python searches when importing modules.
+
+from termstyle import TermStyle as ts
+
 # =============================================================================
 # SETUP: Load Environment Variables
 # =============================================================================
@@ -207,8 +217,34 @@ print("PART 2: Computing Similarity Scores")
 print("="*80)
 
 # Create a search query - this is what a user might type
-query = "Users can't login after changing password"
-print(f"\nSearch Query: '{query}'")
+canned_queries = [
+    "Users can't login after changing password",
+    "Database is running very slowly",
+    "Payment failed for international customer",
+    "Mobile app keeps crashing",
+    "Emails are not being delivered",
+]
+ia_input_prompt = "Select query:\n"
+for idx, qrystring in enumerate(canned_queries):
+    ia_input_prompt += f'[{idx:2}] : "{qrystring}"\n'
+
+ia_input_prompt += "<*> : Type in your own custom query.\n"
+ia_input_prompt += "Your selection: "
+
+query_sel = input(f"{ia_input_prompt}")
+if query_sel.strip().isdigit():
+    sel_idx = int(query_sel.strip())
+    if sel_idx >= len(canned_queries):
+        print(f"{ts.red}Error, invalid query selection.  "
+              f"Valid entries range from [0,{len(canned_queries)-1}].  "
+              f"Switching to default of [0].{ts.off}")
+        sel_idx = 0
+    query = canned_queries[int(sel_idx)]
+elif query_sel.strip() == '*':
+    query = input("Enter your custom query string: ")
+
+print(f"\nSearch Query: '{ts.bold}{ts.green}{query}{ts.off}'")
+input("Press ENTER to continue...")
 
 # -----------------------------------------------------------------------------
 # Generate embedding for the query
@@ -274,7 +310,16 @@ print("PART 3: Finding Most Similar Tickets")
 print("="*80)
 
 # Get top-5 most similar tickets
-top_k = 5
+top_k_input = input(f"Enter desired value for top-K {ts.italic}(or just press enter for default=5){ts.off}: ").strip()
+try:
+    top_k = int(top_k_input)
+    if top_k == 0:
+        raise ValueError("0 is not a valid top-K setting!")
+except ValueError:
+    top_k = 5
+    if top_k_input:
+        print(f"Invalid value for top-K entered, '{top_k_input}'.  Only positive integer values accepted.")
+print(f"Top-K value selected: {top_k}")
 
 # np.argsort() returns indices that would sort the array (ascending)
 # [::-1] reverses to get descending order (highest similarity first)
@@ -284,15 +329,33 @@ top_indices = np.argsort(similarities)[::-1][:top_k]
 print(f"\nTop {top_k} most similar tickets to query: '{query}'")
 print("-" * 80)
 
+similscore_threshhold = 0.5
+similscore_dropped    = False
+rank_at_scoredrop     = -1
+print(f"  {ts.italic}(With similarity score cut-off at < {similscore_threshhold}){ts.off}\n")
 for rank, idx in enumerate(top_indices, 1):
     ticket = tickets[idx]
     score = similarities[idx]
-    
+
+    if not similscore_dropped and score < similscore_threshhold:
+        similscore_dropped = True
+        rank_at_scoredrop  = rank
+        break
+
     print(f"\n#{rank} - Similarity: {score:.4f}")
     print(f"Ticket ID: {ticket['ticket_id']}")
     print(f"Title: {ticket['title']}")
     print(f"Category: {ticket['category']} | Priority: {ticket['priority']}")
     print(f"Description: {ticket['description'][:150]}...")
+
+print()
+if rank_at_scoredrop == -1:
+    print(f"Similarity score never dropped below threshold of {similscore_threshhold} "
+          f"among top {len(top_indices)} indices.")
+else:
+    print(f"Similarity score dropped below threshold of {similscore_threshhold} at rank#{rank_at_scoredrop}")
+input("Press ENTER to continue...")
+
 
 # ============================================================================
 # PART 4: Visualize Embedding Relationships
@@ -396,8 +459,11 @@ print("✓ Visualization saved as 'embeddings_similarity_analysis.png'")
 print("\nKEY INSIGHTS FROM THIS VISUALIZATION:")
 print("  • Left heatmap: Shows TRUE pairwise similarities in 1536D space")
 print("  • Right chart: Query similarity scores (what drives retrieval)")
-print("  • High similarity (green) = semantically similar content")
-print("  • Low similarity (red) = different topics/meanings")
+#print("  • High similarity (green) = semantically similar content")
+#print("  • Low similarity (red) = different topics/meanings")
+print("  • High similarity (yellow) = semantically similar content")
+print("  • Low similarity (dark blue) = different topics/meanings")
+print("  • Medium similarity (blue/gray) = somewhat similar, may be related or tangential")
 print("  • These scores are EXACT - they show true relationships in 1536D space!")
 plt.show(block=True)
 
@@ -443,6 +509,213 @@ for test_query in test_queries:
     print(f"\nQuery: '{test_query}'")
     print(f"  → Best match: {tickets[top_idx]['title']}")
     print(f"  → Similarity: {sims[top_idx]:.4f}")
+
+
+# ============================================================================
+# EXERCISE 4: Compare Two Queries
+# ============================================================================
+#
+# Task: See how the same tickets rank differently for different queries.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 
+# Run it and observe: Do the queries find appropriate tickets?
+# ============================================================================
+# Compare two queries
+query1 = "Login authentication failed"
+query2 = "Slow database performance"
+
+print("\n" + "="*80)
+print("COMPARING TWO QUERIES")
+print("="*80)
+
+for q in [query1, query2]:
+    response = client.embeddings.create(input=[q], model=embedding_model)
+    q_emb = np.array([response.data[0].embedding])
+    sims = cosine_similarity(q_emb, embeddings)[0]
+    top_idx = np.argmax(sims)
+    
+    print(f"\nQuery: '{q}'")
+    print(f"  Best match: {tickets[top_idx]['title']}")
+    print(f"  Score: {sims[top_idx]:.4f}")
+
+input("Press ENTER to continue...")
+
+
+# ============================================================================
+# EXERCISE 5: Test Semantic Understanding
+# ============================================================================
+#
+# Task: Verify that embeddings understand meaning, not just keywords, with a small patch.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 
+# Run it and answer:
+# • What's the similarity between "authentication failed" and "login rejected"?
+# • What's the similarity between "authentication failed" and "database timeout"?
+# • Does this prove embeddings understand meaning, not just keywords?
+# ============================================================================
+import numpy as np
+import os
+from openai import OpenAI
+from sklearn.metrics.pairwise import cosine_similarity
+from dotenv import load_dotenv
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+model = 'text-embedding-3-small'
+
+# These mean the SAME thing but use DIFFERENT words
+texts = [
+    "User authentication failed",      # Original
+    "Login credentials rejected",       # Same meaning, different words
+    "Cannot sign in to account",        # Same meaning, different words
+    "Database connection timeout",      # DIFFERENT topic
+]
+
+# Generate embeddings
+response = client.embeddings.create(input=texts, model=model)
+embeddings = np.array([data.embedding for data in response.data])
+
+# Calculate all pairwise similarities
+similarity_matrix = cosine_similarity(embeddings)
+
+print("\n" + "="*80)
+print("TESTING SEMANTIC UNDERSTANDING")
+print("="*80)
+
+# Print results
+print("Similarity Matrix:")
+print("-" * 50)
+for i, text1 in enumerate(texts):
+    for j, text2 in enumerate(texts):
+        if i < j:  # Only print upper triangle
+            sim = similarity_matrix[i][j]
+            print(f"{sim:.3f}  '{text1[:30]}...' vs '{text2[:30]}...'")
+
+# ============================================================================
+# EXERCISE 6: Filter by Category
+# ============================================================================
+#
+# Task: Add category filtering with one-line logic.
+#       Use the existing search loop in demo/solutions style and add this ONE line:
+#       ```
+#       if category_filter and ticket['category'] != category_filter:
+#           continue
+#       ```
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 
+# ============================================================================
+import json
+import numpy as np
+import os
+from openai import OpenAI
+from sklearn.metrics.pairwise import cosine_similarity
+from dotenv import load_dotenv
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+model = 'text-embedding-3-small'
+
+# Load data
+with open('../../data/synthetic_tickets.json', 'r') as f:
+    tickets = json.load(f)
+
+texts = [f"{t['title']}. {t['description']}" for t in tickets]
+response = client.embeddings.create(input=texts, model=model)
+embeddings = np.array([data.embedding for data in response.data])
+
+def search_with_category(query, category_filter=None, top_k=5):
+    """Search tickets, optionally filtering by category"""
+    # Get query embedding
+    response = client.embeddings.create(input=[query], model=model)
+    query_emb = np.array([response.data[0].embedding])
+    
+    # Calculate similarities
+    similarities = cosine_similarity(query_emb, embeddings)[0]
+    
+    # Get results with category filter
+    results = []
+    for idx in np.argsort(similarities)[::-1]:
+        ticket = tickets[idx]
+        
+        # FILL IN THIS LINE: Skip if category doesn't match filter
+        # Hint: if category_filter is set AND ticket category doesn't match, skip
+        if category_filter and ticket['category'] != category_filter:
+            continue
+        
+        results.append((ticket, similarities[idx]))
+        if len(results) >= top_k:
+            break
+    
+    return results
+
+print("\n" + "="*80)
+print("DEMONSTRATE FILTERING BY CATEGORY:")
+print("="*80)
+
+# Test it
+print("All categories:")
+for ticket, score in search_with_category("login problem"):
+    print(f"  {score:.3f} [{ticket['category']}] {ticket['title']}")
+
+print("\nOnly 'Authentication' category:")
+for ticket, score in search_with_category("login problem", category_filter="Authentication"):
+    print(f"  {score:.3f} [{ticket['category']}] {ticket['title']}")
+
+input("Press ENTER to continue...")
+
+
+# ============================================================================
+# EXERCISE 7: Batch vs Single Embedding
+# ============================================================================
+#
+# Task: Compare speed with a tiny measurement patch.
+#
+# Use the existing embedding section and add 6–10 lines with `time.time()` around:
+# • one-by-one embedding calls
+# • one batched embedding call
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Answer: How much faster is batching for 5 texts?
+# ============================================================================
+import time
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+model = 'text-embedding-3-small'
+
+texts = [
+    "Password reset not working",
+    "Database connection timeout", 
+    "App crashes on startup",
+    "Payment declined error",
+    "Email notifications delayed",
+]
+
+print("\n" + "="*80)
+print("BATCH VS SINGLE EMBEDDING...")
+print("="*80)
+
+# Method 1: SLOW - One API call per text
+print("Method 1: Single API calls...")
+start = time.time()
+for text in texts:
+    response = client.embeddings.create(input=[text], model=model)
+time_slow = time.time() - start
+print(f"  Time: {time_slow:.2f} seconds")
+
+# Method 2: FAST - One API call for all texts
+print("\nMethod 2: Batch API call...")
+start = time.time()
+response = client.embeddings.create(input=texts, model=model)
+time_fast = time.time() - start
+print(f"  Time: {time_fast:.2f} seconds")
+
+# Compare
+print(f"\n✓ Batch is {time_slow/time_fast:.1f}x faster!")
+print(f"  Always batch your embeddings in production!")
+
 
 # ============================================================================
 # SUMMARY
