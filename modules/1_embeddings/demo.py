@@ -348,7 +348,11 @@ fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
 # LEFT PLOT: Similarity heatmap
 # Shows pairwise similarity between all selected tickets
 # Green = high similarity, Red = low similarity
-im = ax1.imshow(similarity_matrix, cmap='RdYlGn', vmin=0, vmax=1)
+###im = ax1.imshow(similarity_matrix, cmap='RdYlGn', vmin=0, vmax=1)
+#   (use sequential colormap instead of the diverging colormap 'RdYlGn' above)
+#   - viridis  # dark blue/purple → blue → green → yellow
+#   - cividis  # dark blue → blue/gray → yellow <specifically for colorblind>
+im = ax1.imshow(similarity_matrix, cmap='cividis', vmin=0, vmax=1)
 ax1.set_xticks(range(len(selected_indices)))
 ax1.set_yticks(range(len(selected_indices)))
 
@@ -395,7 +399,7 @@ print("  • Right chart: Query similarity scores (what drives retrieval)")
 print("  • High similarity (green) = semantically similar content")
 print("  • Low similarity (red) = different topics/meanings")
 print("  • These scores are EXACT - they show true relationships in 1536D space!")
-plt.show(block=False)
+plt.show(block=True)
 
 # ============================================================================
 # PART 5: Experiment with Different Queries
