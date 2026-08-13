@@ -36,6 +36,8 @@ seaborn>=0.13.0
 # Utilities
 python-dotenv>=1.0.0
 tqdm>=4.66.0
+bs4>=0.0.2
+
 # OpenTelemetry (for chromadb compatibility)
 opentelemetry-sdk>=1.20.0
 opentelemetry-exporter-otlp-proto-grpc>=1.20.0
