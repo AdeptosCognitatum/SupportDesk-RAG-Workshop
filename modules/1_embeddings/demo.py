@@ -589,7 +589,8 @@ for i, text1 in enumerate(texts):
     for j, text2 in enumerate(texts):
         if i < j:  # Only print upper triangle
             sim = similarity_matrix[i][j]
-            print(f"{sim:.3f}  '{text1[:30]}...' vs '{text2[:30]}...'")
+            relation = "SIMILAR" if sim > 0.5 else "DIFFERENT"
+            print(f"{sim:.3f} [{relation:9}] '{text1[:30]}...' vs '{text2[:30]}...'")
 
 # ============================================================================
 # EXERCISE 6: Filter by Category
@@ -715,6 +716,16 @@ print(f"  Time: {time_fast:.2f} seconds")
 # Compare
 print(f"\n✓ Batch is {time_slow/time_fast:.1f}x faster!")
 print(f"  Always batch your embeddings in production!")
+
+print(f"{ts.bold}{ts.blue}"
+      f"The reason it's so much faster is that it is vector/matrix multiplication either way.\n"
+      f"Say you have 768 dimensions.  The transformation matrix, 𝑻, is 768x768.\n"
+      f"If you generate a single embedding, 𝓔, it's 1x768.  Multiply 𝓔×𝑻 results in a 1x768 matrix.\n"
+      f"The time it takes for that operation is the *same* if you made a matrix of multiple\n"
+      f"embedddings, each one a row of a matrix 𝑬, and done in a single matrix multiplication.\n"
+      f"Say 𝑬 is 5x768, then 𝑬×𝑻 results in a 5x768 matrix.\n"
+      f"That is why batching is so much faster!\n"
+      f"{ts.off}")
 
 
 # ============================================================================
