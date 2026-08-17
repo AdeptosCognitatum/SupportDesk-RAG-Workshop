@@ -25,6 +25,10 @@ When do you need chunking?
 - Document exceeds embedding model limit (8,191 tokens for OpenAI)
 - Document is too long for precise retrieval
 - You want to retrieve specific sections, not entire documents
+
+━━━━━━━━━━━━━━━━━━━━━
+📂 References:
+- https://docs.langchain.com/oss/javascript/deepagents/rag
 """
 
 import json
@@ -192,6 +196,11 @@ print(f"  Sample chunk: {recursive_chunks[0].page_content[:100]}...")
 #
 # PROS: Best semantic coherence, natural topic boundaries
 # CONS: EXPENSIVE (needs embedding for every sentence), slow
+#
+# ━━━━━━━━━━━━━━━━━━━━━
+# ⛏️ `SemanticChunker` is short on documentation!  Best place to look is at the source code itself:
+#   https://github.com/langchain-ai/langchain-experimental/blob/main/libs/experimental/langchain_experimental/
+#       text_splitter.py
 # =============================================================================
 print("\n--- Strategy 3: Semantic Chunking ---")
 print("  Note: Semantic chunking uses embeddings to find natural break points")
@@ -490,6 +499,9 @@ for i, doc in enumerate(mmr_results, 1):
 # ============================================================================
 # PART 3: Metadata Filtering
 # ============================================================================
+#
+# 📝 References:
+# - 🌟 https://docs.trychroma.com/docs/querying-collections/metadata-filtering
 #
 # THE KILLER FEATURE OF VECTOR DATABASES!
 #
