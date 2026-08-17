@@ -1255,9 +1255,9 @@ Fusion (RRF - Reciprocal Rank Fusion):
 score(doc) = 1/(rank_vector + k) + 1/(rank_keyword + k)
 
 Final Ranking:
-[Doc A: 0.032]  # High in both → most confident
-[Doc C: 0.029]  # Good in both
-[Doc B: 0.015]  # Vector only
+[Doc A: 0.03252]  # Very High in both → most confident
+[Doc C: 0.03227]  # High in both... just barely edged out by [Doc A]
+[Doc B: 0.01613]  # Vector only, just edging out [Doc E] for the final 3rd slot
 ```
 
 **Code:**
