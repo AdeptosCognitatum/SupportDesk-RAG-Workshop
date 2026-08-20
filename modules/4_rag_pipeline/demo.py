@@ -36,6 +36,18 @@ from langchain_core.runnables import RunnablePassthrough  # Pass data through pi
 from dotenv import load_dotenv
 load_dotenv()
 
+# Load my terminal-styling module:
+import sys
+from pathlib import Path
+
+current_script_dir = Path(__file__).resolve().parent
+utils_dir = current_script_dir.parents[1] / "utils" # parents[2] ≍ '/../../'
+utils_dir = utils_dir.resolve()  # normalize (removes any ".." and resolves symlinks where possible)
+sys.path.insert(0, str(utils_dir))  # `sys.path` is the list of directories Python searches when importing modules.
+
+from termstyle import TermStyle as ts
+
+
 print("="*80)
 print("MODULE 4: RAG PIPELINE")
 print("="*80)
@@ -85,7 +97,7 @@ Problem Description:
 Resolution:
 {ticket['resolution']}
     """.strip()
-    
+
     # Create Document with metadata
     # Metadata is crucial for filtering, citation, and source tracking
     # Best practice: Include all information you might want to filter or display later
@@ -144,20 +156,31 @@ print("\n" + "="*80)
 print("PART 2: Setting Up Retriever")
 print("="*80)
 
+_param_K = 3
+retriever_search_argdict_orig = { "k": _param_K } # Retrieve top-K most similar documents
+retriever_search_argdict_mmr  = { "k": _param_K, "fetch_k": (_param_K * 3) + 1 }  # MMR setting
+retriever_search_argdict = retriever_search_argdict_mmr
+
+search_type_similarity = "similarity" # Use cosine similarity for ranking
+search_type_mmr        = "mmr"        # Use MMR (Maximal Marginal Relevance) for more diversity
+search_type = search_type_similarity if retriever_search_argdict is retriever_search_argdict_orig else search_type_mmr
+
 # Create a retriever from the vector store
 # Retrievers are the interface for querying the vector store
 # Reference: https://python.langchain.com/docs/modules/data_connection/retrievers/
 retriever = vector_store.as_retriever(
-    search_type="similarity",  # Use cosine similarity for ranking
-    search_kwargs={"k": 3}  # Retrieve top-3 most similar documents
+    search_type=search_type,       # Use chosen search type
+    search_kwargs=retriever_search_argdict
     # Other options:
     # - "mmr" (Maximal Marginal Relevance): Balances relevance with diversity
     # - "similarity_score_threshold": Only return docs above a score threshold
 )
 
 print("✓ Retriever configured:")
-print(f"  - Search type: similarity")
-print(f"  - Top-K results: 3")
+print(f"  - Search type: {search_type}")
+print(f"  - Top-K results: {_param_K}")
+if retriever_search_argdict is retriever_search_argdict_mmr:
+    print(f"    <MMR> Fetch-K: {retriever_search_argdict['fetch_k']}")
 print("\nTIP: k=3-5 is usually optimal. Too few → missing context, too many → noise")
 
 # Test retriever
@@ -185,7 +208,8 @@ print("="*80)
 # 2. Define what to do when information is missing
 # 3. Request citations for transparency and verification
 # 4. Set the role/persona for appropriate tone
-prompt_template = """You are SupportDesk AI, a technical support assistant that helps engineers troubleshoot issues using historical support ticket data.
+
+prompt_template_orig = """You are SupportDesk AI, a technical support assistant that helps engineers troubleshoot issues using historical support ticket data.
 
 CRITICAL RULES:
 1. Answer using ONLY information from the provided context.
@@ -202,6 +226,47 @@ Context from support tickets:
 Question: {question}
 
 Helpful Answer (with ticket citations):"""
+
+prompt_template_alt_A = """Answer the question using only the ticket context below. Cite ticket IDs.
+
+Context: {context}
+
+Question: {question}
+
+Answer:"""
+prompt_template_alt_B = """You are a support assistant. Answer using ONLY the context below.
+
+Context: {context}
+
+Question: {question}
+
+Think step by step:
+1. What tickets are relevant?
+2. What information do they contain?
+3. How does this answer the question?
+
+Answer:"""
+prompt_template_alt_C = """Answer using only the context. Format as bullet points with ticket citations.
+
+Context: {context}
+
+Question: {question}
+
+Answer (bullet points with sources):"""
+
+citation_prompt = """You are a Support Desk assistant.  Answer the question using ONLY the context below. Include inline citations [TICK-XXX] after each fact.
+
+Example format:
+"Database connection timeouts occur when the pool is undersized [TICK-002]. Increase max_connections [TICK-002]."
+
+Context:
+{context}
+
+Question: {question}
+
+Answer with inline citations:"""
+
+prompt_template = citation_prompt  # prompt_template_orig
 
 # Convert string template to ChatPromptTemplate
 # This creates a reusable template with variable placeholders
@@ -302,27 +367,40 @@ test_queries = [
     "How do I make the perfect pizza?"  # Should refuse to answer!
 ]
 
+do_skip_RAG_sys_test = False
+skip_RAG_sys_test_input = input("Specify if you wish to skip the RAG system test (y/N):")
+if skip_RAG_sys_test_input.lower() == 'y':
+    print(f"Set to {ts.bold}SKIP{ts.off} RAG system tests!")
+    do_skip_RAG_sys_test = True
+
+input("Press ENTER to continue on to Chain Type #1, STUFF (default)...")
+
+print(f"{ts.bold}{ts.blue}" + "-"*80 + f"{ts.off}")
+print(f"{ts.bold}{ts.blue}Using Chain Type: STUFF (default)...{ts.off}")
+print(f"{ts.bold}{ts.blue}" + "-"*80 + f"{ts.off}")
 for query in test_queries:
+    if do_skip_RAG_sys_test:
+        break
     print("\n" + "="*80)
     print(f"QUERY: {query}")
     print("="*80)
-    
+
     # Show retrieved context
     docs = retriever.invoke(query)
     print(f"\nRetrieved {len(docs)} relevant tickets:")
     for i, doc in enumerate(docs, 1):
         print(f"\n  [{i}] {doc.metadata['ticket_id']}: {doc.metadata['title']}")
-    
+
     if qa_chain:
         # Generate answer
         print("\nGenerating answer...")
         result = qa_chain.invoke(query)
-        
+
         print("\n" + "-"*80)
         print("ANSWER:")
         print("-"*80)
         print(result)
-        
+
         print("\n" + "-"*80)
         print("SOURCE DOCUMENTS:")
         print("-"*80)
@@ -331,6 +409,180 @@ for query in test_queries:
     else:
         print("\n(LLM not configured - would generate answer here)")
 
+input("Press ENTER to continue on to Chain Type #2, MAP_REDUCE...")
+
+print(f"{ts.bold}{ts.blue}" + "-"*80 + f"{ts.off}")
+print(f"{ts.bold}{ts.blue}Using Chain Type: MAP_REDUCE...{ts.off}")
+print(f"{ts.bold}{ts.blue}" + "-"*80 + f"{ts.off}")
+for query in test_queries:
+    if do_skip_RAG_sys_test:
+        break
+    print("\n" + "="*80)
+    print(f"QUERY: {query}")
+    print("="*80)
+
+    # Show retrieved context
+    docs = retriever.invoke(query)
+    if not docs:
+        print(f"{ts.red}No relevant documents retrieved for this query!{ts.off}")
+        continue
+
+    print(f"\nRetrieved {len(docs)} relevant tickets:")
+    for i, doc in enumerate(docs, 1):
+        print(f"\n  [{i}] {doc.metadata['ticket_id']}: {doc.metadata['title']}")
+
+    # Map phase: extract key info from each document independently
+    individual_answers = []
+    for doc in docs:
+        single_prompt = ChatPromptTemplate.from_template(
+            "Extract key info about this issue:\n{doc}\n\nKey points:"
+        )
+        chain = single_prompt | llm | StrOutputParser()
+        individual_answers.append(chain.invoke({"doc" : doc.page_content}))
+
+    # Reduce phase: combine summaries into one answer
+    combine_prompt = ChatPromptTemplate.from_template(
+        "Combine these points to answer: {question}\n\nPoints:\n{summaries}"
+    )
+    combine_chain = combine_prompt | llm | StrOutputParser()
+    print("\nGenerating answer...")
+    result = combine_chain.invoke({"question" : query, "summaries" : '\n'.join(individual_answers)})
+    print("\n" + "-"*80)
+    print("ANSWER:")
+    print("-"*80)
+    print(f"{ts.magenta}{result}{ts.off}")
+
+input("Press ENTER to continue on to Chain Type #3, REFINE...")
+print(f"{ts.bold}{ts.blue}" + "-"*80 + f"{ts.off}")
+print(f"{ts.bold}{ts.blue}Using Chain Type: REFINE...{ts.off}")
+print(f"{ts.bold}{ts.blue}" + "-"*80 + f"{ts.off}")
+for query in test_queries:
+    if do_skip_RAG_sys_test:
+        break
+    print("\n" + "="*80)
+    print(f"QUERY: {query}")
+    print("="*80)
+
+    # Show retrieved context
+    docs = retriever.invoke(query)
+    if not docs:
+        print(f"{ts.red}No relevant documents retrieved for this query!{ts.off}")
+        continue
+
+    print(f"\nRetrieved {len(docs)} relevant tickets:")
+    for i, doc in enumerate(docs, 1):
+        print(f"\n  [{i}] {doc.metadata['ticket_id']}: {doc.metadata['title']}")
+
+    # Step 1: Draft answer from first doc
+    initial_prompt = ChatPromptTemplate.from_template(
+        "Answer the question using only this context.\n\n"
+        "Context: {context}\n\nQuestion: {question}\n\nAnswer:"
+    )
+    current_answer = (initial_prompt | llm | StrOutputParser()).invoke({
+        "context" : docs[0].page_content, "question" : query
+    })
+    print(f"  👀 Initial Answer after first document: {ts.italic}{current_answer}{ts.off}")
+
+    # Steps 2..N: Refine with each remaining doc
+    refine_prompt = ChatPromptTemplate.from_template(
+        "Existing answer: {existing_answer}\n\n"
+        "Additional context:\n{context}\n\nQuestion: {question}\n\n"
+        "Refine the answer using the new context.  If not useful, return unchanged.\n\nRefined answer:"
+    )
+    for doc in docs[1:]:
+        current_answer = (refine_prompt | llm | StrOutputParser()).invoke({
+            "existing_answer" : current_answer,
+            "context"         : doc.page_content,
+            "question"        : query
+        })
+
+    print("\n" + "-"*80)
+    print("ANSWER:")
+    print("-"*80)
+    print(f"{ts.lite_red}{current_answer}{ts.off}")
+
+
+input("Demo of Chain Type #3, REFINE, has finished.  Press ENTER to continue...")
+
+# ============================================================================
+# Exercise 6: Add Metadata Filtering
+# ============================================================================
+
+print(f"\n" + '×'*80)
+print(f"{ts.undrline}{ts.cyan}Exercise 6: Add Metadata Filtering{ts.off}")
+print(f"\n" + '×'*80)
+
+test_query = "system problem"
+print(f"  Test Query: {test_query}")
+
+docs = vector_store.similarity_search(test_query, k=3)
+print(f"\n{ts.bold}[Plain similarity search]{ts.off} : Retrieved {len(docs)} relevant tickets:")
+for i, doc in enumerate(docs, 1):
+    metadata_sans_ticket_id = {k:v for k,v in doc.metadata.items() if k != 'ticket_id' and k != 'category' and k != 'priority'}
+    print(f"\n  [{i}] {doc.metadata['ticket_id']}: category={doc.metadata['category']} | "
+          f"priority={doc.metadata['priority']} "
+          f"{metadata_sans_ticket_id}")
+
+docs = vector_store.similarity_search(test_query, k=3, filter={"category" : "Authentication"})
+print(f"\n{ts.bold}[With category filter 👉🏻 'category' : 'Authentication']{ts.off} : "
+      f"Retrieved {len(docs)} relevant tickets:")
+for i, doc in enumerate(docs, 1):
+    metadata_sans_ticket_id = {k:v for k,v in doc.metadata.items() if k != 'ticket_id' and k != 'category' and k != 'priority'}
+    print(f"\n  [{i}] {doc.metadata['ticket_id']}: category={doc.metadata['category']} | "
+          f"priority={doc.metadata['priority']} "
+          f"{metadata_sans_ticket_id}")
+
+docs = vector_store.similarity_search(test_query, k=3, filter={"priority" : "High"})
+print(f"\n{ts.bold}[With category filter 👉🏻 'priority' : 'High']{ts.off} : "
+      f"Retrieved {len(docs)} relevant tickets:")
+for i, doc in enumerate(docs, 1):
+    metadata_sans_ticket_id = {k:v for k,v in doc.metadata.items() if k != 'ticket_id' and k != 'category' and k != 'priority'}
+    print(f"\n  [{i}] {doc.metadata['ticket_id']}: category={doc.metadata['category']} | "
+          f"priority={doc.metadata['priority']} "
+          f"{metadata_sans_ticket_id}")
+
+input("Exercise 6 completed.  Press ENTER to continue...")
+
+# ============================================================================
+# Exercise 7: Add Streaming Responses
+# ============================================================================
+
+# Task: Stream responses word-by-word for better UX.
+
+from langchain_core.callbacks import StreamingStdOutCallbackHandler
+
+# Create streaming LLM
+streaming_llm = ChatOpenAI(
+    model=os.getenv('OPENAI_CHAT_MODEL', 'gpt-4o-mini'),
+    temperature=0,
+    streaming=True,
+    callbacks=[StreamingStdOutCallbackHandler()]
+)
+
+# Use a detailed prompt so the response is long enough to see streaming in action
+streaming_prompt = ChatPromptTemplate.from_template("""Answer using the context. Provide a detailed, thorough response.
+Include step-by-step troubleshooting instructions, root causes, and preventive measures.
+Cite ticket IDs for every fact.
+
+Context: {context}
+
+Question: {question}
+
+Detailed Answer:""")
+
+streaming_chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | streaming_prompt
+    | streaming_llm
+    | StrOutputParser()
+)
+
+streaming_query = "What causes database connection issues and how do I troubleshoot and prevent them?"
+result = streaming_chain.invoke(streaming_query)  # Will print token by token!
+
+input("\n\nExercise 7 completed, press ENTER to continue...")
+
+
 # ============================================================================
 # PART 7: Validation & Fallback
 # ============================================================================
@@ -338,7 +590,7 @@ print("\n" + "="*80)
 print("PART 7: Enhanced RAG with Answer Validation")
 print("="*80)
 
-def rag_with_validation(query, retriever, llm, min_similarity_score=0.5):
+def rag_with_validation(query, retriever, llm, min_similarity_score=0.5) -> str:
     """
         RAG pipeline with additional validation and fallback.
 
@@ -373,13 +625,13 @@ def rag_with_validation(query, retriever, llm, min_similarity_score=0.5):
     if best_score < min_similarity_score:
         print(f"\n⚠ Best match relevance ({best_score:.4f}) is below threshold ({min_similarity_score}) — too dissimilar to answer confidently")
         return "I don't have enough relevant information in the ticket history to answer that question confidently."
-    
+
     # If we pass the confidence gate, build context and ask the model normally.
     docs = [doc for doc, score in docs_with_scores]
     context = "\n\n---\n\n".join([doc.page_content for doc in docs])
-    
+
     prompt = f"""{prompt_template.replace('{context}', context).replace('{question}', query)}"""
-    
+
     if llm:
         # Use chat-model invocation directly and normalize return type to string.
         # `ChatOpenAI.invoke(...)` returns an AIMessage object in modern LangChain.
@@ -388,22 +640,52 @@ def rag_with_validation(query, retriever, llm, min_similarity_score=0.5):
     else:
         return "(LLM not configured)"
 
+try:
+    testing_min_similarity_score = float(input("Enter your desired minimum similarity score (between 0.0 and 1.0): "))
+    if testing_min_similarity_score <= 0.0 or testing_min_similarity_score >= 1.0:
+        raise ValueError("Your specified minimum similarity score is out-of-range")
+except Exception as e:
+    testing_min_similarity_score = 0.5
+    print(f"{e}")
+    print(f"Invalid minimum similarity score specified.  (Fallback to default)")
+
+print(f"Minimum Similarity Score: {testing_min_similarity_score}")
+
 print("\nTesting validation logic:")
 print("\n1. Relevant query (should answer):")
-rag_with_validation(
+response = rag_with_validation(
     "How to fix database connection timeouts?",
     retriever,
     llm,
-    min_similarity_score=0.5
+    min_similarity_score=testing_min_similarity_score
 )
+print(f"  Response: {ts.green}{ts.italic}{response}{ts.off}")
 
 print("\n2. Irrelevant query (should refuse):")
-rag_with_validation(
+response = rag_with_validation(
     "What is the capital of France?",
     retriever,
     llm,
-    min_similarity_score=0.5
+    min_similarity_score=testing_min_similarity_score
 )
+print(f"  Response: {ts.green}{ts.italic}{response}{ts.off}")
+
+testlist_rag_validation = {
+    "authentication problems" : "High confidence",
+    "system performance"      : "Medium confidence",
+    "how to bake cookies"     : "Low confidence",
+}
+testnum = 3
+for testprompt, confidence_level in testlist_rag_validation.items():
+    print(f"\n{testnum}. {confidence_level} Query - '{testprompt}':")
+    response = rag_with_validation(
+        testprompt,
+        retriever,
+        llm,
+        min_similarity_score=testing_min_similarity_score
+    )
+    print(f"  Response: {ts.green}{ts.italic}{response}{ts.off}")
+    testnum += 1
 
 # ============================================================================
 # PART 8: Conversation with History (Multi-Turn RAG)
@@ -459,7 +741,7 @@ Context:
 
     def ask_with_history(question, history):
         """Ask a question with query reformulation and history tracking.
-        
+
         On the first turn (empty history), skip the condense step and send
         the question directly to the retriever. On follow-up turns, rewrite
         the question into a standalone query so the retriever finds the
@@ -470,7 +752,7 @@ Context:
             standalone = question
         else:
             # Follow-up turn: rewrite using history context
-            # e.g. "What was the resolution for that ticket?" → 
+            # e.g. "What was the resolution for that ticket?" →
             #      "What was the resolution for ticket TICK-001?"
             standalone = condense_chain.invoke({
                 "question": question, "chat_history": history
@@ -548,21 +830,21 @@ if qa_chain:
     print("\nSupportDesk RAG Assistant Ready!")
     print("Ask questions about support ticket history.")
     print("Type 'quit' to exit.\n")
-    
+
     while True:
         user_query = input("You: ").strip()
-        
+
         if user_query.lower() in ['quit', 'exit', 'q']:
             print("Goodbye!")
             break
-        
+
         if not user_query:
             continue
-        
+
         print("\nAssistant: ", end="")
         answer = qa_chain.invoke(user_query)
         print(answer)
-        
+
         docs = retriever.invoke(user_query)
         print(f"\n📎 Sources: {', '.join([doc.metadata['ticket_id'] for doc in docs])}")
         print()
