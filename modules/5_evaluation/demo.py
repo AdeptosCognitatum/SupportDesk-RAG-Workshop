@@ -23,6 +23,18 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Load my terminal-styling module:
+import sys
+from pathlib import Path
+
+current_script_dir = Path(__file__).resolve().parent
+utils_dir = current_script_dir.parents[1] / "utils" # parents[2] ≍ '/../../'
+utils_dir = utils_dir.resolve()  # normalize (removes any ".." and resolves symlinks where possible)
+sys.path.insert(0, str(utils_dir))  # `sys.path` is the list of directories Python searches when importing modules.
+
+from termstyle import TermStyle as ts
+
+
 print("="*80)
 print("RAG EVALUATION: TWO-LAYER APPROACH")
 print("="*80)
@@ -55,7 +67,7 @@ Category: {ticket['category']}
 Priority: {ticket['priority']}
 Description: {ticket['description']}
 Resolution: {ticket['resolution']}"""
-    
+
     doc = Document(
         page_content=content,
         metadata={
@@ -113,10 +125,10 @@ def generate_answer(query, k=3):
     """
     # Retrieve documents
     docs = vector_store.similarity_search(query, k=k)
-    
+
     # Build context
     context = "\n\n".join([doc.page_content for doc in docs])
-    
+
     # Create prompt
     prompt = f"""You are a technical support assistant. Answer the question using ONLY the provided context.
 
@@ -126,7 +138,7 @@ Context:
 Question: {query}
 
 Answer (cite ticket IDs):"""
-    
+
     # Generate answer using direct OpenAI client
     response = openai_client.chat.completions.create(
         model=chat_model,
@@ -134,7 +146,7 @@ Answer (cite ticket IDs):"""
         temperature=0
     )
     answer = response.choices[0].message.content
-    
+
     return {'answer': answer, 'source_documents': docs}
 
 print("✓ RAG function ready")
@@ -151,7 +163,7 @@ print("Measures: Are we retrieving the right documents?")
 def calculate_retrieval_metrics(retrieved_ids, relevant_ids, k=3):
     """
     Calculate Precision, Recall, and F1 at k
-    
+
     Precision@k = (relevant docs in top-k) / k
     Recall@k = (relevant docs in top-k) / (total relevant docs)
     F1@k = harmonic mean of Precision and Recall
@@ -159,19 +171,19 @@ def calculate_retrieval_metrics(retrieved_ids, relevant_ids, k=3):
     # Restrict to top-k because retrieval quality is rank-sensitive.
     retrieved_set = set(retrieved_ids[:k])
     relevant_set = set(relevant_ids)
-    
+
     # True positives: relevant docs that were retrieved
     tp = len(retrieved_set & relevant_set)
-    
+
     # Precision: what % of retrieved docs are relevant?
     precision = tp / k if k > 0 else 0
-    
+
     # Recall: what % of relevant docs were retrieved?
     recall = tp / len(relevant_set) if len(relevant_set) > 0 else 0
-    
+
     # F1: harmonic mean balancing precision and recall
     f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-    
+
     return {
         'precision': precision,
         'recall': recall,
@@ -185,24 +197,30 @@ def calculate_retrieval_metrics(retrieved_ids, relevant_ids, k=3):
 print("\nEvaluating retrieval for all queries...")
 retrieval_results = []
 
+###
+### 📝 Note how your retrieval depth can be greater than your evaluation cut-off
+### E.g., `similarity_search(query, k=5)`, then later `calculate_retrieval_metrics(..., k=3)`
+### This sort of thing allows us to similarity search **once**, then compute Precision and Recall at different k-values.
+### E.g., similarity search at k=10, then compute Precision@3, Precision@5, and Precision@10 (ditto for Recall@K).
+###
 for idx, eval_query in enumerate(eval_queries, 1):
     query = eval_query['question']
     relevant_ids = eval_query['relevant_ticket_ids']
-    
+
     print(f"  [{idx}/{len(eval_queries)}] Processing query...", end='\r')
-    
+
     try:
         # Retrieve documents
         results = vector_store.similarity_search(query, k=5)
         retrieved_ids = [doc.metadata['ticket_id'] for doc in results]
-        
+
         # Calculate metrics at k=3
         metrics = calculate_retrieval_metrics(retrieved_ids, relevant_ids, k=3)
         metrics['query_id'] = eval_query['query_id']
         metrics['question'] = query
         metrics['retrieved'] = retrieved_ids[:3]
         metrics['relevant'] = relevant_ids
-        
+
         retrieval_results.append(metrics)
     except Exception as e:
         print(f"\n  ⚠ Error on query {idx}: {str(e)[:50]}")
@@ -243,6 +261,34 @@ for i in range(min(3, len(retrieval_results))):
     print(f"  Retrieved: {result['retrieved']}")
     print(f"  Precision: {result['precision']:.2f} | Recall: {result['recall']:.2f} | F1: {result['f1']:.2f}")
 
+
+# ============================================================================
+# Exercise 3: Compare different 𝗸 values:
+# ============================================================================
+print(f"{ts.bold}{ts.blue}" + '='*80 + f"{ts.off}")
+print(f"{ts.bold}{ts.blue}Metrics at different k-values:{ts.off}")
+print(f"{ts.bold}{ts.blue}" + '='*80 + f"{ts.off}")
+k_vals = [ 1, 3, 5, 10 ]
+search_depth = max(k_vals)
+print(f"\nTesting k values: {k_vals}")
+for query in eval_queries:
+    metrics = []
+    print(f"{ts.magenta}Similarity Search at depth={search_depth} for query:{ts.off}\n  "
+          f"{ts.italic}'{query['question']}'{ts.off}")
+    docs = vector_store.similarity_search(query['question'], k=search_depth)
+
+    for k in k_vals:
+        retrieved = [doc.metadata['ticket_id'] for doc in docs]
+        m = calculate_retrieval_metrics(retrieved, query['relevant_ticket_ids'], k=k)
+        metrics.append(m)
+        print(f"    metric@{k}: Precision={m['precision']:.2f}, Recall={m['recall']:.2f}, F1={m['f1']:.2f}")
+
+    print(f"  AVG over all k's: Precision={np.mean([m['precision'] for m in metrics]):.2f}, "
+          f"Recall={np.mean([m['recall'] for m in metrics]):.2f}, "
+          f"F1={np.mean([m['f1'] for m in metrics]):.2f}")
+
+input("Press ENTER to continue...")
+
 # ============================================================================
 # PART 3: GENERATION LAYER EVALUATION
 # ============================================================================
@@ -259,12 +305,12 @@ def evaluate_groundedness(answer, context_docs):
     """
     Groundedness (Faithfulness): Is the answer supported by the retrieved context?
     Uses LLM-as-judge to check if answer contains hallucinations
-    
+
     Returns: score 0.0-1.0 (higher = more grounded)
     """
     # Judge receives ONLY retrieved evidence to test faithfulness.
     context = "\n\n".join([doc.page_content for doc in context_docs])
-    
+
     prompt = f"""Evaluate if the ANSWER is fully supported by the CONTEXT. Check for hallucinations or unsupported claims.
 
 CONTEXT:
@@ -290,16 +336,16 @@ Reasoning: <explanation>"""
             temperature=0,
             timeout=30
         )
-        
+
         output = response.choices[0].message.content
-        
+
         # Parse score
         try:
             score_line = [line for line in output.split('\n') if line.startswith('Score:')][0]
             score = float(score_line.split(':')[1].strip()) / 10.0  # Normalize to 0-1
         except:
             score = 0.5  # Default if parsing fails
-        
+
         return {
             'score': score,
             'verdict': 'GROUNDED' if score >= 0.7 else 'PARTIAL' if score >= 0.4 else 'HALLUCINATED',
@@ -313,7 +359,7 @@ def evaluate_completeness(question, answer, reference_answer=None):
     """
     Response Completeness: Does the answer fully address the question?
     Uses LLM-as-judge to check if all aspects of the question are answered
-    
+
     Returns: score 0.0-1.0 (higher = more complete)
     """
     # If a reference answer exists, completeness becomes relative to ideal coverage.
@@ -364,16 +410,16 @@ Reasoning: <explanation>"""
             temperature=0,
             timeout=30
         )
-        
+
         output = response.choices[0].message.content
-        
+
         # Parse score
         try:
             score_line = [line for line in output.split('\n') if line.startswith('Score:')][0]
             score = float(score_line.split(':')[1].strip()) / 10.0  # Normalize to 0-1
         except:
             score = 0.5  # Default if parsing fails
-        
+
         return {
             'score': score,
             'verdict': 'COMPLETE' if score >= 0.7 else 'PARTIAL' if score >= 0.4 else 'INCOMPLETE',
@@ -393,29 +439,29 @@ generation_results = []
 for idx, eval_query in enumerate(eval_queries[:2], 1):  # Evaluate first 2 to save time
     query = eval_query['question']
     reference = eval_query.get('reference_answer', None)
-    
+
     print("-"*80)
     print(f"\n[{idx}/2] Query: {query}")
-    
+
     try:
         # Generate answer using RAG
         print("  → Generating answer...")
         result = generate_answer(query)
         answer = result['answer']
         source_docs = result['source_documents']
-        
+
         print(f"\nGenerated Answer:\n{answer}")
-        
+
         # Evaluate groundedness
         print("\n  → Evaluating Groundedness...")
         groundedness = evaluate_groundedness(answer, source_docs)
         print(f"    Score: {groundedness['score']:.2f} - {groundedness['verdict']}")
-        
+
         # Evaluate completeness
         print("\n  → Evaluating Completeness...")
         completeness = evaluate_completeness(query, answer, reference)
         print(f"    Score: {completeness['score']:.2f} - {completeness['verdict']}")
-        
+
         generation_results.append({
             'query_id': eval_query['query_id'],
             'question': query,
@@ -552,7 +598,7 @@ def compare_configurations(queries, k_values):
     based on measured precision/recall/F1 instead of intuition.
     """
     results = {}
-    
+
     for k in k_values:
         print(f"  Testing k={k}...")
         retrievals = []
@@ -565,14 +611,14 @@ def compare_configurations(queries, k_values):
             except Exception as e:
                 print(f"\n    ⚠ Error: {str(e)[:50]}")
                 continue
-        
+
         if retrievals:
             results[f'k={k}'] = {
                 'precision': np.mean([r['precision'] for r in retrievals]),
                 'recall': np.mean([r['recall'] for r in retrievals]),
                 'f1': np.mean([r['f1'] for r in retrievals])
             }
-    
+
     return results
 
 comparison = compare_configurations(eval_queries, [3, 5])
@@ -592,19 +638,19 @@ Key Takeaways:
 ──────────────
 1. Two-Layer Evaluation is Essential
    → Separately measure retrieval and generation quality
-   
+
 2. Retrieval Metrics (Precision, Recall, F1)
    → Diagnose if you're finding the right documents
-   
+
 3. Generation Metrics (Groundedness, Completeness)
    → Ensure faithful and comprehensive answers
-   
+
 4. Use LLM-as-Judge for Generation Metrics
    → Automated evaluation using GPT-4/Claude
-   
+
 5. Always Create Evaluation Datasets
    → Ground truth enables systematic improvement
-   
+
 6. A/B Test Different Configurations
    → Measure impact of changes quantitatively
 
