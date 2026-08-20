@@ -819,6 +819,57 @@ else:
     print("Query reformulation ensures the retriever gets meaningful queries")
     print("instead of vague pronouns like 'it' or 'that ticket'.")
 
+
+# ============================================================================
+# Bonus Challenge: Hallucination Detection
+# ============================================================================
+print("\n" + f"{ts.bold}{ts.italic}{ts.bg_yellow}" + "="*80 + f"{ts.off}")
+print(f"{ts.bold}{ts.italic}{ts.bg_yellow}Bonus Challenge: Hallucination Detection{ts.off}")
+print(f"{ts.bold}{ts.italic}{ts.bg_yellow}" + "="*80 + f"{ts.off}")
+
+def detect_hallucination(answer, source_documents, llm):
+    """Use LLM-as-judge to verify grounding"""
+    # You should make one small change to force a conservative output when no source documents are passed
+    if not source_documents:
+        return f"HALLUCINATION: No source documents, therefore answer could {ts.bold}not{ts.off} have had any basis."
+
+    source_text = "\n\n".join([doc.page_content for doc in source_documents])
+
+    prompt = f"""You are a fact-checker. Determine if the answer is fully grounded in sources.
+
+SOURCE DOCUMENTS:
+{source_text}
+
+ANSWER TO CHECK:
+{answer}
+
+Is every claim supported by the sources?
+Respond: "GROUNDED" or "HALLUCINATION" with brief explanation.
+
+Response:"""    
+    verdict = llm.invoke(prompt).content  # 🧐 Note this is **not** a LangChain chain, but the raw LLM itself!
+    return verdict
+
+###
+### Tests: One grounded answer, one intentionally unsupported answer:
+###
+# Grounded answer
+test_query = "How do I fix authentication failures after password reset?"
+print(f"\nTest query: '{test_query}'")
+retrieved_docs = retriever.invoke(test_query)
+test_answer = "To fix authentication failures after a password reset, you need to clear all active sessions and force re-authentication. This issue arises because the password hash algorithm was updated, but session tokens weren't invalidated [TICK-001]. Additionally, implementing automatic session cleanup on password change can help prevent similar issues in the future [TICK-001]."
+print(f"Test Answer: '{test_answer}'")
+print(f"Verdict: {detect_hallucination(test_answer, retrieved_docs, llm)}")
+
+# Unsupported Answer:
+test_query = "How do I fix authentication failures after password reset?"
+print(f"\nTest query: '{test_query}'")
+retrieved_docs = retriever.invoke(test_query)
+test_answer = "Database connection timeouts occur when the pool is undersized for the peak load, leading to issues such as 'connection pool exhausted' and 'timeout waiting for connection' [TICK-002]."
+print(f"Test Answer: '{test_answer}'")
+print(f"Verdict: {detect_hallucination(test_answer, retrieved_docs, llm)}")
+
+
 # ============================================================================
 # PART 9: Interactive Demo
 # ============================================================================
