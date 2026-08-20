@@ -331,7 +331,7 @@ Reasoning: <explanation>"""
 
     try:
         response = client.chat.completions.create(
-            model=os.getenv('OPENAI_CHAT_MODEL', 'gpt-4o-mini'),
+            model=chat_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             timeout=30
@@ -405,7 +405,7 @@ Reasoning: <explanation>"""
 
     try:
         response = client.chat.completions.create(
-            model=os.getenv('OPENAI_CHAT_MODEL', 'gpt-4o-mini'),
+            model=chat_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             timeout=30
@@ -431,12 +431,12 @@ Reasoning: <explanation>"""
 
 # Evaluate generation for sample queries
 print("\nEvaluating generation quality (sample queries)...")
-print("Note: This uses LLM-as-judge (GPT-4o-mini) to evaluate quality")
+print(f"Note: This uses LLM-as-judge ({chat_model}) to evaluate quality")
 print("This may take 30-60 seconds per query...\n")
 
 generation_results = []
 
-for idx, eval_query in enumerate(eval_queries[:2], 1):  # Evaluate first 2 to save time
+for idx, eval_query in enumerate(eval_queries[:2], start=1):  # Evaluate first 2 to save time, begin idx at 1 (not 0)
     query = eval_query['question']
     reference = eval_query.get('reference_answer', None)
 
@@ -502,16 +502,16 @@ print(f"""
 ┌─────────────────────────────────────────────────────────────┐
 │                    RAG SYSTEM EVALUATION                    │
 ├─────────────────────────────────────────────────────────────┤
-│ Dataset: {len(eval_queries)} evaluation queries                           │
+│ Dataset: {len(eval_queries)} evaluation queries                              │
 ├─────────────────────────────────────────────────────────────┤
 │ RETRIEVAL LAYER                                             │
-│   • Precision@3:  {avg_precision:.4f}  {'✓' if avg_precision >= 0.80 else '⚠' if avg_precision >= 0.70 else '✗'}                              │
-│   • Recall@3:     {avg_recall:.4f}  {'✓' if avg_recall >= 0.70 else '⚠' if avg_recall >= 0.60 else '✗'}                              │
-│   • F1 Score@3:   {avg_f1:.4f}  {'✓' if avg_f1 >= 0.75 else '⚠' if avg_f1 >= 0.65 else '✗'}                              │
+│   • Precision@3:  {avg_precision:.4f}  {'✓' if avg_precision >= 0.80 else '⚠' if avg_precision >= 0.70 else '✗'}                                 │
+│   • Recall@3:     {avg_recall:.4f}  {'✓' if avg_recall >= 0.70 else '⚠' if avg_recall >= 0.60 else '✗'}                                 │
+│   • F1 Score@3:   {avg_f1:.4f}  {'✓' if avg_f1 >= 0.75 else '⚠' if avg_f1 >= 0.65 else '✗'}                                 │
 ├─────────────────────────────────────────────────────────────┤
 │ GENERATION LAYER                                            │
-│   • Groundedness: {avg_groundedness:.4f}  {'✓' if avg_groundedness >= 0.80 else '⚠' if avg_groundedness >= 0.70 else '✗'}                              │
-│   • Completeness: {avg_completeness:.4f}  {'✓' if avg_completeness >= 0.75 else '⚠' if avg_completeness >= 0.65 else '✗'}                              │
+│   • Groundedness: {avg_groundedness:.4f}  {'✓' if avg_groundedness >= 0.80 else '⚠' if avg_groundedness >= 0.70 else '✗'}                                 │
+│   • Completeness: {avg_completeness:.4f}  {'✓' if avg_completeness >= 0.75 else '⚠' if avg_completeness >= 0.65 else '✗'}                                 │
 └─────────────────────────────────────────────────────────────┘
 
 INTERPRETATION:
@@ -572,11 +572,11 @@ print("RELEASE GATE DECISION")
 print("-"*60)
 print(f"  {decision}")
 if red_flags:
-    print("\n  Critical (RED):")
+    print(f"\n  {ts.bold}{ts.red}Critical (RED):{ts.off}")
     for f in red_flags:
         print(f"    ✗ {f}")
 if yellow_flags:
-    print("\n  Warning (YELLOW):")
+    print(f"\n  {ts.bold}{ts.yellow}Warning (YELLOW):{ts.off}")
     for f in yellow_flags:
         print(f"    ⚠ {f}")
 print("-"*60)
@@ -590,7 +590,7 @@ print("="*80)
 
 print("\nExample: Compare retrieval with k=3 vs k=5")
 
-def compare_configurations(queries, k_values):
+def compare_configurations(queries, k_values: list[int]):
     """
     Compare retrieval settings (e.g., different k values) on the same query set.
 
@@ -623,11 +623,28 @@ def compare_configurations(queries, k_values):
 
 comparison = compare_configurations(eval_queries, [3, 5])
 
+avg_measures = {}
+max_measures = {}
+for measure_type in [ 'precision', 'recall', 'f1' ]:
+    measured_values = [metric[measure_type] for metric in comparison.values()]
+    avg_measures[measure_type] = float(np.mean(measured_values))
+    max_measures[measure_type] = max(measured_values).item()
+print(f"{ts.cyan}{ts.bg_black}avg_measures: {avg_measures.items()}{ts.off}")
+print(f"{ts.cyan}{ts.bg_black}max_measures: {max_measures.items()}{ts.off}")
+
 print("\nConfiguration Comparison:")
 print(f"{'Config':<10} {'Precision':<12} {'Recall':<12} {'F1':<12}")
 print("-" * 46)
 for config, metrics in comparison.items():
-    print(f"{config:<10} {metrics['precision']:<12.4f} {metrics['recall']:<12.4f} {metrics['f1']:<12.4f}")
+    #print(f"{config:<10} {metrics['precision']:<12.4f} {metrics['recall']:<12.4f} {metrics['f1']:<12.4f}")
+    precision_ts = ts.bold if metrics['precision'] == max_measures['precision'] else ''
+    recall_ts    = ts.bold if metrics['recall'] == max_measures['recall'] else ''
+    f1_ts        = ts.bold if metrics['f1'] == max_measures['f1'] else ''
+    print(f"{config:<10} "
+          f"{precision_ts}{metrics['precision']:<12.4f}{ts.off} "
+          f"{recall_ts}{metrics['recall']:<12.4f}{ts.off} "
+          f"{f1_ts}{metrics['f1']:<12.4f}{ts.off}")
+
 
 print("\n" + "="*80)
 print("DEMO COMPLETE!")

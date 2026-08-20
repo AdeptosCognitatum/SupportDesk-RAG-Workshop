@@ -43,8 +43,8 @@ Layer 2: GENERATION EVALUATION
 
 ### Why Two Layers?
 
-**Retrieval Failure** → Wrong documents → Bad answer
-**Generation Failure** → Right documents → Still bad answer
+- **Retrieval Failure** → Wrong documents → Bad answer
+- **Generation Failure** → Right documents → Still bad answer
 
 You must evaluate **both** to diagnose problems correctly.
 
@@ -660,6 +660,50 @@ evaluation_form = {
 ```
 
 ### Inter-Rater Agreement
+
+Cohen Kappa Score:
+- Kappa ($\kappa$) is computed based on how often each annotator uses each label, and derives the odds of them agreeing by *pure chance*.
+
+For example, say Alice and Bob each classify 100 documents as either Relevant (`R`) or **Not Relevant** (`N`).  Say their totals are:
+- Alice:
+  - Relevant: 40 documents
+  - Not Relevant: 60 documents
+- Bob:
+  - Relevant: 30 documents
+  - Not Relevant: 70 documents
+
+So Alice's labeling tendencies are:
+- $P_A(R) = 0.4$, $P_A(N) = 0.6$	​
+
+Bob's are:
+- $P_A(R) = 0.3$, $P_A(N) = 0.7$
+
+> ***What would happen if they were labeling independently at random?***
+
+The probability of them both saying a document is relevant *by pure chance* is:
+- $P_{A \lor B}(R) = P_A(R) \times P_B(R) = 0.4 \times 0.3 = 0.12$
+- Thus we'd expect them to accidentally agree 12% of the time.
+
+Similarly, the probability of them both saying a document is **not** relevant *by pure chance* is:
+- $P_{A \lor B}(N) = P_A(N) \times P_B(N) = 0.6 \times 0.7 = 0.42$
+- That's an additional 42% chance of agreement
+
+Summing both probabilities:
+- $P_e = P_{A \lor B}(R) + P_{A \lor B}(R) = 0.12 + 0.42 = 0.54$
+
+Thus in this case, 54% probability of "agreement expected by chance".
+
+Let's say the *observed* agreement rate is 80%:
+- $P_o = 0.8$
+
+Then Cohen's Kappa is computed as follows:
+- $$\kappa = \frac{P_o - P_e}{1 - P_e}$$
+
+In this example, we'd get:
+- $$\kappa = \frac{0.8 - 0.54}{1 - 0.54}$$
+- $$= \frac{0.26}{0.46}$$
+- $$\approx 0.5652$$
+  - *(approximately 56.52%)*
 
 ```python
 from sklearn.metrics import cohen_kappa_score
